@@ -4,10 +4,28 @@ import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as lambdaBase from "aws-cdk-lib/aws-lambda";
 import * as apigateway from "aws-cdk-lib/aws-apigateway";
 import * as path from "path";
+import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as lambdaEventSources from "aws-cdk-lib/aws-lambda-event-sources";
 
 export class FirstSqsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    // Create DLQ
+    const dlq = new sqs.Queue(this, "OrdersDLQ", {
+      queueName: `${this.stackName}-orders-dlq`,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    const queue = new sqs.Queue(this, "OrdersQueue", {
+      visibilityTimeout: cdk.Duration.seconds(1),
+      queueName: `${this.stackName}-orders-queue`,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      deadLetterQueue: {
+        queue: dlq,
+        maxReceiveCount: 3,
+      },
+    });
 
     // Create Producer Lambda (API Gateway -> SQS)
     const producerLambda = new NodejsFunction(this, "OrderProducer", {
@@ -15,7 +33,12 @@ export class FirstSqsStack extends cdk.Stack {
       entry: path.join(__dirname, "../src/lambda/handler.ts"),
       handler: "producer",
       functionName: `${this.stackName}-producer`,
+      environment: {
+        QUEUE_URL: queue.queueUrl,
+      },
     });
+
+    queue.grantSendMessages(producerLambda);
 
     // Create Consumer Lambda (SQS -> Processing)
     const consumerLambda = new NodejsFunction(this, "OrderConsumer", {
@@ -24,6 +47,12 @@ export class FirstSqsStack extends cdk.Stack {
       handler: "consumer",
       functionName: `${this.stackName}-consumer`,
     });
+
+    consumerLambda.addEventSource(
+      new lambdaEventSources.SqsEventSource(queue, {
+        batchSize: 10, // how many msgs we get at the same time
+      })
+    );
 
     const api = new apigateway.RestApi(this, "OrdersApi");
 

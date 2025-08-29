@@ -1,28 +1,56 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import {
+  APIGatewayProxyEvent,
+  APIGatewayProxyResult,
+  SQSEvent,
+} from "aws-lambda";
+import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 
-export const producer = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+const sqs = new SQSClient({ region: "ap-southeast-1" });
+
+export const producer = async (
+  event: APIGatewayProxyEvent
+): Promise<APIGatewayProxyResult> => {
   await new Promise((resolve) => setTimeout(resolve, 2000));
   try {
     const { orderId } = JSON.parse(event.body!);
 
+    await sqs.send(
+      new SendMessageCommand({
+        QueueUrl: process.env.QUEUE_URL!,
+        MessageBody: JSON.stringify({ orderId }),
+      })
+    );
+
     return {
       statusCode: 200,
       body: JSON.stringify({
-        message: 'Order created',
+        message: "Order placed in queue",
         orderId,
       }),
     };
   } catch (error) {
-    console.error('Error creating order:', error);
+    console.error("Error creating order:", error);
     return {
       statusCode: 500,
       body: JSON.stringify({
-        message: 'Error creating order',
+        message: "Error creating order",
       }),
     };
   }
 };
 
-export const consumer = async (): Promise<void> => {
-  console.log('finished processing order');
+export const consumer = async (event: SQSEvent): Promise<void> => {
+  // console.log("Event received :", event);
+
+throw new Error('test');
+
+
+  console.log("TEMP :", event);
+  const messages = event.Records;
+  for (const message of messages) {
+    const { orderId } = JSON.parse(message.body);
+    console.log("Processing order:", orderId);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    console.log("Finished processing order:", orderId);
+  }
 };
