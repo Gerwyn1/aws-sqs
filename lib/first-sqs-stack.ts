@@ -1,16 +1,37 @@
-import * as cdk from 'aws-cdk-lib';
-import { Construct } from 'constructs';
-// import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as cdk from "aws-cdk-lib";
+import { Construct } from "constructs";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import * as lambdaBase from "aws-cdk-lib/aws-lambda";
+import * as apigateway from "aws-cdk-lib/aws-apigateway";
+import * as path from "path";
 
 export class FirstSqsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // The code that defines your stack goes here
+    // Create Producer Lambda (API Gateway -> SQS)
+    const producerLambda = new NodejsFunction(this, "OrderProducer", {
+      runtime: lambdaBase.Runtime.NODEJS_22_X,
+      entry: path.join(__dirname, "../src/lambda/handler.ts"),
+      handler: "producer",
+      functionName: `${this.stackName}-producer`,
+    });
 
-    // example resource
-    // const queue = new sqs.Queue(this, 'FirstSqsQueue', {
-    //   visibilityTimeout: cdk.Duration.seconds(300)
-    // });
+    // Create Consumer Lambda (SQS -> Processing)
+    const consumerLambda = new NodejsFunction(this, "OrderConsumer", {
+      runtime: lambdaBase.Runtime.NODEJS_22_X,
+      entry: path.join(__dirname, "../src/lambda/handler.ts"),
+      handler: "consumer",
+      functionName: `${this.stackName}-consumer`,
+    });
+
+    const api = new apigateway.RestApi(this, "OrdersApi");
+
+    const orders = api.root.addResource("orders");
+    orders.addMethod("POST", new apigateway.LambdaIntegration(producerLambda));
+
+    new cdk.CfnOutput(this, "ApiUrl", {
+      value: api.url!,
+    });
   }
 }
